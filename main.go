@@ -72,12 +72,17 @@ func strOr(ptr *string, fallback string) string {
 func main() {
 	var includes regexSlice
 	var excludes regexSlice
+	var rawJSON bool
 
 	// Repeated regex flags
 	flag.Var(&includes, "include", "Regex pattern to include (can be repeated)")
 	flag.Var(&includes, "i", "Regex pattern to include (shorthand)")
 	flag.Var(&excludes, "exclude", "Regex pattern to exclude (can be repeated)")
 	flag.Var(&excludes, "e", "Regex pattern to exclude (shorthand)")
+
+	// Output formatting flag
+	flag.BoolVar(&rawJSON, "json", false, "Emit raw JSON log lines instead of prettified text")
+	flag.BoolVar(&rawJSON, "j", false, "Emit raw JSON log lines (shorthand)")
 
 	// K8s & general flags
 	namespace := flag.String("namespace", "envoy-gateway-system", "Kubernetes namespace")
@@ -97,8 +102,7 @@ func main() {
 		}
 	}
 
-	// Standard Kubernetes client configuration loading:
-	// Automatically respects $KUBECONFIG environment variable, fallback to ~/.kube/config
+	// Standard Kubernetes client configuration loading
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if *kubeconfig != "" {
 		loadingRules.ExplicitPath = *kubeconfig
@@ -163,10 +167,14 @@ func main() {
 					continue
 				}
 
-				formatted := formatLogLine(line)
-				if formatted != "" {
+				output := line
+				if !rawJSON {
+					output = formatLogLine(line)
+				}
+
+				if output != "" {
 					outMutex.Lock()
-					fmt.Println(formatted)
+					fmt.Println(output)
 					outMutex.Unlock()
 				}
 			}
