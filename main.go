@@ -6,9 +6,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -16,16 +15,35 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
 )
 
-// ANSI Escape Codes for formatting
+// ANSI Escape Codes
 const (
 	ColorReset  = "\u001b[0m"
 	ColorRed    = "\u001b[1;31m"
 	ColorYellow = "\u001b[1;33m"
 	ColorGreen  = "\u001b[1;32m"
 )
+
+// Custom flag type to support repeated regex flags
+type regexSlice []*regexp.Regexp
+
+func (r *regexSlice) String() string {
+	var strs []string
+	for _, re := range *r {
+		strs = append(strs, re.String())
+	}
+	return strings.Join(strs, ", ")
+}
+
+func (r *regexSlice) Set(value string) error {
+	re, err := regexp.Compile(value)
+	if err != nil {
+		return fmt.Errorf("invalid regex pattern %q: %w", value, err)
+	}
+	*r = append(*r, re)
+	return nil
+}
 
 // EnvoyLog represents the Envoy JSON access log schema
 type EnvoyLog struct {
@@ -44,7 +62,6 @@ type EnvoyLog struct {
 	DownstreamLocalAddress *string `json:"downstream_local_address"`
 }
 
-// Helper to handle null/empty pointers
 func strOr(ptr *string, fallback string) string {
 	if ptr == nil || *ptr == "" {
 		return fallback
@@ -53,19 +70,46 @@ func strOr(ptr *string, fallback string) string {
 }
 
 func main() {
-	// Flags & Default values
+	var includes regexSlice
+	var excludes regexSlice
+
+	// Repeated regex flags
+	flag.Var(&includes, "include", "Regex pattern to include (can be repeated)")
+	flag.Var(&includes, "i", "Regex pattern to include (shorthand)")
+	flag.Var(&excludes, "exclude", "Regex pattern to exclude (can be repeated)")
+	flag.Var(&excludes, "e", "Regex pattern to exclude (shorthand)")
+
+	// K8s & general flags
 	namespace := flag.String("namespace", "envoy-gateway-system", "Kubernetes namespace")
 	labelSelector := flag.String("l", "gateway.envoyproxy.io/owning-gateway-name=main", "Pod label selector")
 	containerName := flag.String("container", "envoy", "Container name")
-	grepPattern := flag.String("grep", getEnv("EGLOGS_GREP", "agones-cluster-lb"), "Exclude log lines matching this string")
-	kubeconfig := flag.String("kubeconfig", getKubeconfigPath(), "Path to kubeconfig file")
-	tailLines := flag.Int64("tail", 1, "Lines of recent log history to show (-1 for standard follow)")
+	kubeconfig := flag.String("kubeconfig", "", "Optional path to explicit kubeconfig file")
+	tailLines := flag.Int64("tail", 1, "Lines of recent log history to show")
 	flag.Parse()
 
-	// K8s client setup
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	// Fallback to EGLOGS_GREP env var if no -e/-exclude passed
+	if len(excludes) == 0 {
+		if envGrep := os.Getenv("EGLOGS_GREP"); envGrep != "" {
+			pattern := strings.TrimPrefix(envGrep, "-v -e ")
+			if re, err := regexp.Compile(pattern); err == nil {
+				excludes = append(excludes, re)
+			}
+		}
+	}
+
+	// Standard Kubernetes client configuration loading:
+	// Automatically respects $KUBECONFIG environment variable, fallback to ~/.kube/config
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if *kubeconfig != "" {
+		loadingRules.ExplicitPath = *kubeconfig
+	}
+
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		loadingRules,
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error building kubeconfig: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading kubeconfig: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -77,7 +121,6 @@ func main() {
 
 	ctx := context.Background()
 
-	// List matching pods
 	pods, err := clientset.CoreV1().Pods(*namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: *labelSelector,
 	})
@@ -92,9 +135,8 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	var outMutex sync.Mutex // Mutex to prevent interleaved output lines
+	var outMutex sync.Mutex
 
-	// Tail logs from all matching Envoy pods simultaneously
 	for _, pod := range pods.Items {
 		wg.Add(1)
 		go func(podName string) {
@@ -117,8 +159,7 @@ func main() {
 			for scanner.Scan() {
 				line := scanner.Text()
 
-				// Filter out excluded logs
-				if *grepPattern != "" && strings.Contains(line, *grepPattern) {
+				if !shouldProcessLine(line, includes, excludes) {
 					continue
 				}
 
@@ -135,10 +176,32 @@ func main() {
 	wg.Wait()
 }
 
+func shouldProcessLine(line string, includes, excludes regexSlice) bool {
+	if len(includes) > 0 {
+		matched := false
+		for _, re := range includes {
+			if re.MatchString(line) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	for _, re := range excludes {
+		if re.MatchString(line) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func formatLogLine(raw string) string {
 	var log EnvoyLog
 	if err := json.Unmarshal([]byte(raw), &log); err != nil {
-		// Output non-JSON log line directly
 		return raw
 	}
 
@@ -161,7 +224,7 @@ func formatLogLine(raw string) string {
 		)
 	}
 
-	// 2. Standard HTTP Request Logging
+	// 2. Standard Request
 	var statusColor string
 	if log.ResponseCode >= 500 {
 		statusColor = ColorRed
@@ -186,18 +249,4 @@ func formatLogLine(raw string) string {
 		log.Duration,
 		remoteAddr, userAgent,
 	)
-}
-
-func getEnv(key, fallback string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return fallback
-}
-
-func getKubeconfigPath() string {
-	if home := homedir.HomeDir(); home != "" {
-		return filepath.Join(home, ".kube", "config")
-	}
-	return ""
 }
