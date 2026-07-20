@@ -135,7 +135,9 @@ type EnvoyLog struct {
 	Method                 *string `json:"method"`
 	RequestedServerName    *string `json:"requested_server_name"`
 	XEnvoyOriginPath       *string `json:"x-envoy-origin-path"`
+	Protocol               *string `json:"protocol"`
 	ResponseCode           int     `json:"response_code"`
+	BytesSent              int64   `json:"bytes_sent"`
 	Duration               int64   `json:"duration"`
 	RealRemoteAddress      *string `json:"real_remote_address"`
 	UserAgent              *string `json:"user-agent"`
@@ -398,6 +400,7 @@ func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
 	if !omitPath {
 		path = strOr(log.XEnvoyOriginPath, "")
 	}
+	protocol := strOr(log.Protocol, "-")
 	remoteAddr := strOr(log.RealRemoteAddress, "-")
 	requestSource := remoteAddr
 	if !omitUserAgent {
@@ -405,11 +408,12 @@ func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
 	}
 
 	return fmt.Sprintf(
-		"[%s] %s %s%s ➜ %s%d%s (%dms) | %s",
+		"[%s] %s %s%s %s ➜ %s%d%s %d (%dms) | %s",
 		log.StartTime,
 		method,
-		sni, path,
+		sni, path, protocol,
 		statusColor, log.ResponseCode, ColorReset,
+		log.BytesSent,
 		log.Duration,
 		requestSource,
 	)
