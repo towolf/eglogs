@@ -64,7 +64,7 @@ eglogs -tail 100 -status '500-' -duration '1000-'
 Include or exclude matching log lines. These flags may be repeated:
 
 ```sh
-eglogs -include '/api/' -exclude '/healthz'
+eglogs -i /api/ -e /healthz -e Blackbox-Exporter
 ```
 
 Emit the original JSON instead of formatted output:
