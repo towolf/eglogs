@@ -32,7 +32,7 @@ Kubernetes source:
   -selector, -l string    Pod label selector (default "gateway.envoyproxy.io/owning-gateway-name=main")
   -container, -c string   Container name (default "envoy")
   -kubeconfig string      Optional path to explicit kubeconfig file
-  -tail int               Lines of recent log history to show (default 0)
+  -tail int               Lines of recent log history to show (default 100)
 
 Log filters:
   -include, -i regexp     Regex pattern to include (can be repeated)
