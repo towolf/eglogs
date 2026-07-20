@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -45,6 +46,89 @@ func (r *regexSlice) Set(value string) error {
 	return nil
 }
 
+// Range filtering helper types
+type rangeRule struct {
+	hasMin bool
+	min    int64
+	hasMax bool
+	max    int64
+}
+
+type rangeMatcher []rangeRule
+
+func parseRangeMatcher(input string) (rangeMatcher, error) {
+	if strings.TrimSpace(input) == "" {
+		return nil, nil
+	}
+
+	var rm rangeMatcher
+	parts := strings.Split(input, ",")
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		if strings.Contains(p, "-") {
+			sub := strings.SplitN(p, "-", 2)
+			var rule rangeRule
+
+			if sub[0] != "" {
+				minVal, err := strconv.ParseInt(sub[0], 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid range minimum %q: %w", sub[0], err)
+				}
+				rule.hasMin = true
+				rule.min = minVal
+			}
+
+			if sub[1] != "" {
+				maxVal, err := strconv.ParseInt(sub[1], 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid range maximum %q: %w", sub[1], err)
+				}
+				rule.hasMax = true
+				rule.max = maxVal
+			}
+
+			rm = append(rm, rule)
+		} else {
+			val, err := strconv.ParseInt(p, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid number %q: %w", p, err)
+			}
+			rm = append(rm, rangeRule{
+				hasMin: true, min: val,
+				hasMax: true, max: val,
+			})
+		}
+	}
+
+	return rm, nil
+}
+
+func (rm rangeMatcher) Matches(val int64) bool {
+	if len(rm) == 0 {
+		return true // Empty matcher matches all values
+	}
+
+	for _, rule := range rm {
+		match := true
+		if rule.hasMin && val < rule.min {
+			match = false
+		}
+		if rule.hasMax && val > rule.max {
+			match = false
+		}
+		if match {
+			return true
+		}
+	}
+
+	return false
+}
+
 // EnvoyLog represents the Envoy JSON access log schema
 type EnvoyLog struct {
 	StartTime              string  `json:"start_time"`
@@ -73,7 +157,8 @@ func main() {
 	var includes regexSlice
 	var excludes regexSlice
 	var rawJSON bool
-	var minStatus int
+	var statusStr string
+	var durationStr string
 
 	// Repeated regex flags
 	flag.Var(&includes, "include", "Regex pattern to include (can be repeated)")
@@ -85,10 +170,13 @@ func main() {
 	flag.BoolVar(&rawJSON, "json", false, "Emit raw JSON log lines instead of prettified text")
 	flag.BoolVar(&rawJSON, "j", false, "Emit raw JSON log lines (shorthand)")
 
-	// Minimum status flag
-	flag.IntVar(&minStatus, "status", 0, "Minimum HTTP response code threshold")
-	flag.IntVar(&minStatus, "min-status", 0, "Minimum HTTP response code threshold (alias)")
-	flag.IntVar(&minStatus, "s", 0, "Minimum HTTP response code threshold (shorthand)")
+	// Status code range/list flags
+	flag.StringVar(&statusStr, "status", "", "Filter HTTP response code list/range (e.g. '404,500,503', '200-300', '400-')")
+	flag.StringVar(&statusStr, "s", "", "Filter HTTP response code list/range (shorthand)")
+
+	// Duration range/list flags (in milliseconds)
+	flag.StringVar(&durationStr, "duration", "", "Filter request duration range/list in ms (e.g. '-200', '200-500', '1000-')")
+	flag.StringVar(&durationStr, "d", "", "Filter request duration range/list in ms (shorthand)")
 
 	// K8s & general flags
 	namespace := flag.String("namespace", "envoy-gateway-system", "Kubernetes namespace")
@@ -97,6 +185,19 @@ func main() {
 	kubeconfig := flag.String("kubeconfig", "", "Optional path to explicit kubeconfig file")
 	tailLines := flag.Int64("tail", 1, "Lines of recent log history to show")
 	flag.Parse()
+
+	// Parse range matchers
+	statusMatcher, err := parseRangeMatcher(statusStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing status filter: %v\n", err)
+		os.Exit(1)
+	}
+
+	durationMatcher, err := parseRangeMatcher(durationStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing duration filter: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Standard Kubernetes client configuration loading
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -164,12 +265,17 @@ func main() {
 					continue
 				}
 
-				// 2. Filter by minimum status code
+				// 2. Parse JSON & filter by status/duration range matchers
 				var log EnvoyLog
 				isJSON := json.Unmarshal([]byte(line), &log) == nil
 
-				if isJSON && minStatus > 0 && log.ResponseCode < minStatus {
-					continue
+				if isJSON {
+					if !statusMatcher.Matches(int64(log.ResponseCode)) {
+						continue
+					}
+					if !durationMatcher.Matches(log.Duration) {
+						continue
+					}
 				}
 
 				// 3. Format output
