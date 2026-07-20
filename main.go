@@ -157,6 +157,8 @@ func main() {
 	var includes regexSlice
 	var excludes regexSlice
 	var rawJSON bool
+	var omitPath bool
+	var omitUserAgent bool
 	var statusStr string
 	var durationStr string
 	var showHelp bool
@@ -170,6 +172,10 @@ func main() {
 	// Output formatting flag
 	flag.BoolVar(&rawJSON, "json", false, "Emit raw JSON log lines instead of prettified text")
 	flag.BoolVar(&rawJSON, "j", false, "Emit raw JSON log lines (shorthand)")
+	flag.BoolVar(&omitPath, "omit-path", false, "Omit the request path from prettified output")
+	flag.BoolVar(&omitPath, "p", false, "Omit the request path (shorthand)")
+	flag.BoolVar(&omitUserAgent, "omit-user-agent", false, "Omit the user agent from prettified output")
+	flag.BoolVar(&omitUserAgent, "u", false, "Omit the user agent (shorthand)")
 
 	// Status code range/list flags
 	flag.StringVar(&statusStr, "status", "", "Filter HTTP response code list/range (e.g. '404,500,503', '200-300', '400-')")
@@ -209,6 +215,8 @@ Log filters:
 
 Output:
   -json, -j               Emit raw JSON log lines instead of prettified text
+  -omit-path, -p          Omit the request path from prettified output
+  -omit-user-agent, -u    Omit the user agent from prettified output
   -h, --help              Show help
 `, os.Args[0])
 	}
@@ -315,7 +323,7 @@ Output:
 				output := line
 				if !rawJSON {
 					if isJSON {
-						output = formatParsedLogLine(&log)
+						output = formatParsedLogLine(&log, omitPath, omitUserAgent)
 					}
 				}
 
@@ -354,7 +362,7 @@ func shouldProcessLine(line string, includes, excludes regexSlice) bool {
 	return true
 }
 
-func formatParsedLogLine(log *EnvoyLog) string {
+func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
 	// 1. Condition: route_name == null
 	if log.RouteName == nil {
 		flags := strOr(log.ResponseFlags, "-")
@@ -386,17 +394,23 @@ func formatParsedLogLine(log *EnvoyLog) string {
 
 	method := strOr(log.Method, "-")
 	sni := strOr(log.RequestedServerName, "")
-	path := strOr(log.XEnvoyOriginPath, "")
+	path := ""
+	if !omitPath {
+		path = strOr(log.XEnvoyOriginPath, "")
+	}
 	remoteAddr := strOr(log.RealRemoteAddress, "-")
-	userAgent := strOr(log.UserAgent, "-")
+	requestSource := remoteAddr
+	if !omitUserAgent {
+		requestSource += " " + strOr(log.UserAgent, "-")
+	}
 
 	return fmt.Sprintf(
-		"[%s] %s %s%s ➜ %s%d%s (%dms) | %s %s",
+		"[%s] %s %s%s ➜ %s%d%s (%dms) | %s",
 		log.StartTime,
 		method,
 		sni, path,
 		statusColor, log.ResponseCode, ColorReset,
 		log.Duration,
-		remoteAddr, userAgent,
+		requestSource,
 	)
 }

@@ -54,6 +54,12 @@ Emit the original JSON instead of formatted output:
 eglogs -json
 ```
 
+Omit the request path or user agent from formatted output:
+
+```sh
+eglogs -omit-path -omit-user-agent
+```
+
 Use a specific kubeconfig or container:
 
 ```sh
@@ -62,7 +68,7 @@ eglogs -kubeconfig ~/.kube/config -c envoy
 
 Run `eglogs -h` for all options. Kubernetes flags support `-n`/`-namespace`,
 `-l`/`-selector`, and `-c`/`-container`. Short forms for filters and output are
-`-i`, `-e`, `-s`, `-d`, and `-j`.
+`-i`, `-e`, `-s`, `-d`, `-j`, `-p` (omit path), and `-u` (omit user agent).
 
 ## Build
 
