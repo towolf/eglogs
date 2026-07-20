@@ -195,7 +195,7 @@ func main() {
 	containerName := flag.String("container", "envoy", "Container name")
 	flag.StringVar(containerName, "c", "envoy", "Container name (shorthand)")
 	kubeconfig := flag.String("kubeconfig", "", "Optional path to explicit kubeconfig file")
-	tailLines := flag.Int64("tail", 0, "Lines of recent log history to show")
+	tailLines := flag.Int64("tail", 100, "Lines of recent log history to show")
 	flag.BoolVar(&showHelp, "h", false, "Show help")
 	flag.BoolVar(&showHelp, "help", false, "Show help")
 
@@ -207,7 +207,7 @@ Kubernetes source:
   -selector, -l string    Pod label selector (default "gateway.envoyproxy.io/owning-gateway-name=main")
   -container, -c string   Container name (default "envoy")
   -kubeconfig string      Optional path to explicit kubeconfig file
-  -tail int               Lines of recent log history to show (default 0)
+  -tail int               Lines of recent log history to show (default 100)
 
 Log filters:
   -include, -i regexp     Regex pattern to include (can be repeated)
