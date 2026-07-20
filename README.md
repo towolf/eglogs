@@ -42,8 +42,9 @@ Log filters:
 
 Output:
   -json, -j               Emit raw JSON log lines instead of prettified text
-  -omit-path, -p          Omit the request path from prettified output
+  -path-segments, -p int  Limit the request path to this many segments (default unlimited)
   -omit-user-agent, -u    Omit the user agent from prettified output
+  -xds-route-names, -x    Show XDS route and rule names in prettified output
   -h, --help              Show help
 ```
 
@@ -73,10 +74,16 @@ Emit the original JSON instead of formatted output:
 eglogs -json
 ```
 
-Omit the request path or user agent from formatted output:
+Show the XDS route and rule names in formatted output:
 
 ```sh
-eglogs -omit-path -omit-user-agent
+eglogs -x
+```
+
+Limit the request path to two segments and omit the user agent from formatted output:
+
+```sh
+eglogs -p 2 -omit-user-agent
 ```
 
 Use a specific kubeconfig or container:
@@ -87,7 +94,8 @@ eglogs -kubeconfig ~/.kube/config -c envoy
 
 Run `eglogs -h` for all options. Kubernetes flags support `-n`/`-namespace`,
 `-l`/`-selector`, and `-c`/`-container`. Short forms for filters and output are
-`-i`, `-e`, `-s`, `-d`, `-j`, `-p` (omit path), and `-u` (omit user agent).
+`-i`, `-e`, `-s`, `-d`, `-j`, `-p` (path segment limit), `-u` (omit user agent),
+and `-x` (XDS route and rule names).
 
 ## Build
 

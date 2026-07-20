@@ -142,6 +142,8 @@ type EnvoyLog struct {
 	RealRemoteAddress      *string `json:"real_remote_address"`
 	UserAgent              *string `json:"user-agent"`
 	RouteName              *string `json:"route_name"`
+	XDSRouteName           *string `json:"xds_route_name"`
+	XDSRouteRuleName       *string `json:"xds_route_rule_name"`
 	ResponseFlags          *string `json:"response_flags"`
 	ResponseFlagsLong      *string `json:"response_flags_long"`
 	ResponseCodeDetails    *string `json:"response_code_details"`
@@ -159,8 +161,9 @@ func main() {
 	var includes regexSlice
 	var excludes regexSlice
 	var rawJSON bool
-	var omitPath bool
+	var pathSegments int
 	var omitUserAgent bool
+	var showXDSRouteNames bool
 	var statusStr string
 	var durationStr string
 	var showHelp bool
@@ -174,10 +177,12 @@ func main() {
 	// Output formatting flag
 	flag.BoolVar(&rawJSON, "json", false, "Emit raw JSON log lines instead of prettified text")
 	flag.BoolVar(&rawJSON, "j", false, "Emit raw JSON log lines (shorthand)")
-	flag.BoolVar(&omitPath, "omit-path", false, "Omit the request path from prettified output")
-	flag.BoolVar(&omitPath, "p", false, "Omit the request path (shorthand)")
+	flag.IntVar(&pathSegments, "path-segments", -1, "Limit the request path to this many segments (default unlimited)")
+	flag.IntVar(&pathSegments, "p", -1, "Limit the request path to this many segments (shorthand)")
 	flag.BoolVar(&omitUserAgent, "omit-user-agent", false, "Omit the user agent from prettified output")
 	flag.BoolVar(&omitUserAgent, "u", false, "Omit the user agent (shorthand)")
+	flag.BoolVar(&showXDSRouteNames, "xds-route-names", false, "Show XDS route and rule names in prettified output")
+	flag.BoolVar(&showXDSRouteNames, "x", false, "Show XDS route and rule names (shorthand)")
 
 	// Status code range/list flags
 	flag.StringVar(&statusStr, "status", "", "Filter HTTP response code list/range (e.g. '404,500,503', '200-300', '400-')")
@@ -217,8 +222,9 @@ Log filters:
 
 Output:
   -json, -j               Emit raw JSON log lines instead of prettified text
-  -omit-path, -p          Omit the request path from prettified output
+  -path-segments, -p int  Limit the request path to this many segments (default unlimited)
   -omit-user-agent, -u    Omit the user agent from prettified output
+  -xds-route-names, -x    Show XDS route and rule names in prettified output
   -h, --help              Show help
 `, os.Args[0])
 	}
@@ -227,6 +233,10 @@ Output:
 	if showHelp {
 		printUsage(os.Stdout)
 		return
+	}
+	if pathSegments < -1 {
+		fmt.Fprintln(os.Stderr, "Error: path segment limit must be non-negative")
+		os.Exit(1)
 	}
 
 	// Parse range matchers
@@ -325,7 +335,7 @@ Output:
 				output := line
 				if !rawJSON {
 					if isJSON {
-						output = formatParsedLogLine(&log, omitPath, omitUserAgent)
+						output = formatParsedLogLine(&log, pathSegments, omitUserAgent, showXDSRouteNames)
 					}
 				}
 
@@ -364,7 +374,12 @@ func shouldProcessLine(line string, includes, excludes regexSlice) bool {
 	return true
 }
 
-func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
+func formatParsedLogLine(log *EnvoyLog, pathSegments int, omitUserAgent, showXDSRouteNames bool) string {
+	xdsRouteNames := ""
+	if showXDSRouteNames {
+		xdsRouteNames = fmt.Sprintf(" | xds: %s / %s", strOr(log.XDSRouteName, "-"), strOr(log.XDSRouteRuleName, "-"))
+	}
+
 	// 1. Condition: route_name == null
 	if log.RouteName == nil {
 		flags := strOr(log.ResponseFlags, "-")
@@ -374,13 +389,13 @@ func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
 		localAddr := strOr(log.DownstreamLocalAddress, "-")
 
 		return fmt.Sprintf(
-			"[%s] %s%s (%s)%s (%s%s%s) ➜ %s%d%s (%dms) | %s → %s",
+			"[%s] %s%s (%s)%s (%s%s%s) ➜ %s%d%s (%dms) | %s → %s%s",
 			log.StartTime,
 			ColorRed, flags, flagsLong, ColorReset,
 			ColorRed, details, ColorReset,
 			ColorRed, log.ResponseCode, ColorReset,
 			log.Duration,
-			remoteAddr, localAddr,
+			remoteAddr, localAddr, xdsRouteNames,
 		)
 	}
 
@@ -396,10 +411,7 @@ func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
 
 	method := strOr(log.Method, "-")
 	sni := strOr(log.RequestedServerName, "")
-	path := ""
-	if !omitPath {
-		path = strOr(log.XEnvoyOriginPath, "")
-	}
+	path := limitPathSegments(strOr(log.XEnvoyOriginPath, ""), pathSegments)
 	protocol := strOr(log.Protocol, "-")
 	remoteAddr := strOr(log.RealRemoteAddress, "-")
 	requestSource := remoteAddr
@@ -408,13 +420,36 @@ func formatParsedLogLine(log *EnvoyLog, omitPath, omitUserAgent bool) string {
 	}
 
 	return fmt.Sprintf(
-		"[%s] %s %s%s %s ➜ %s%d%s %d (%dms) | %s",
+		"[%s] %s %s%s %s ➜ %s%d%s %d (%dms) | %s%s",
 		log.StartTime,
 		method,
 		sni, path, protocol,
 		statusColor, log.ResponseCode, ColorReset,
 		log.BytesSent,
 		log.Duration,
-		requestSource,
+		requestSource, xdsRouteNames,
 	)
+}
+
+func limitPathSegments(path string, limit int) string {
+	if limit < 0 || path == "" {
+		return path
+	}
+	if limit == 0 {
+		return ""
+	}
+
+	start := 0
+	if path[0] == '/' {
+		start = 1
+	}
+	for i := 0; i < limit; i++ {
+		next := strings.IndexAny(path[start:], "/?")
+		if next < 0 {
+			return path
+		}
+		start += next + 1
+	}
+
+	return strings.TrimRight(path[:start], "/?")
 }
