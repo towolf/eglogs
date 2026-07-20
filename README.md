@@ -4,6 +4,8 @@
 easier reading. It can filter logs by regular expression, HTTP status, and
 request duration, or emit the original JSON log lines.
 
+Inspired by my bash alias and implemented in Go using AI.
+
 ## Requirements
 
 By default, `eglogs` uses the current kubeconfig context, reads the `envoy`
