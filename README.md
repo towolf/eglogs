@@ -6,26 +6,17 @@ request duration, or emit the original JSON log lines.
 
 ## Requirements
 
-- Go 1.26 or later
-- A working Kubernetes configuration with permission to list pods and read
-  their logs
-
 By default, `eglogs` uses the current kubeconfig context, reads the `envoy`
 container in the `envoy-gateway-system` namespace, and selects pods belonging
 to a gateway named `main`.
 
 ## Install
 
-Clone the repository and install the command with Go:
-
 ```sh
 git clone https://github.com/towolf/eglogs.git
 cd eglogs
-go install .
+go build -o eglogs main.go
 ```
-
-The executable is installed in `$GOBIN`, or in `$GOPATH/bin` when `$GOBIN` is
-not set. Ensure that directory is included in your `PATH`.
 
 ## Usage
 
