@@ -8,7 +8,8 @@ request duration, or emit the original JSON log lines.
 
 By default, `eglogs` uses the current kubeconfig context, reads the `envoy`
 container in the `envoy-gateway-system` namespace, and selects pods belonging
-to a gateway named `main`.
+to a gateway named `main`. It streams all available log history before following
+new entries; use `-tail` to limit the initial history.
 
 ## Install
 
@@ -29,8 +30,8 @@ eglogs
 Select a different gateway or namespace:
 
 ```sh
-eglogs -namespace my-gateway-system \
-  -l 'gateway.envoyproxy.io/owning-gateway-name=my-gateway'
+eglogs -n my-gateway-system \
+  -selector 'gateway.envoyproxy.io/owning-gateway-name=my-gateway'
 ```
 
 Show recent server errors taking at least one second:
@@ -54,11 +55,12 @@ eglogs -json
 Use a specific kubeconfig or container:
 
 ```sh
-eglogs -kubeconfig ~/.kube/config -container envoy
+eglogs -kubeconfig ~/.kube/config -c envoy
 ```
 
-Run `eglogs -h` for all options. Short forms are available for the common
-filters: `-i`, `-e`, `-s`, `-d`, and `-j`.
+Run `eglogs -h` for all options. Kubernetes flags support `-n`/`-namespace`,
+`-l`/`-selector`, and `-c`/`-container`. Short forms for filters and output are
+`-i`, `-e`, `-s`, `-d`, and `-j`.
 
 ## Build
 

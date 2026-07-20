@@ -159,6 +159,7 @@ func main() {
 	var rawJSON bool
 	var statusStr string
 	var durationStr string
+	var showHelp bool
 
 	// Repeated regex flags
 	flag.Var(&includes, "include", "Regex pattern to include (can be repeated)")
@@ -180,11 +181,43 @@ func main() {
 
 	// K8s & general flags
 	namespace := flag.String("namespace", "envoy-gateway-system", "Kubernetes namespace")
+	flag.StringVar(namespace, "n", "envoy-gateway-system", "Kubernetes namespace (shorthand)")
 	labelSelector := flag.String("l", "gateway.envoyproxy.io/owning-gateway-name=main", "Pod label selector")
+	flag.StringVar(labelSelector, "selector", "gateway.envoyproxy.io/owning-gateway-name=main", "Pod label selector")
 	containerName := flag.String("container", "envoy", "Container name")
+	flag.StringVar(containerName, "c", "envoy", "Container name (shorthand)")
 	kubeconfig := flag.String("kubeconfig", "", "Optional path to explicit kubeconfig file")
-	tailLines := flag.Int64("tail", 1, "Lines of recent log history to show")
+	tailLines := flag.Int64("tail", 0, "Lines of recent log history to show")
+	flag.BoolVar(&showHelp, "h", false, "Show help")
+	flag.BoolVar(&showHelp, "help", false, "Show help")
+
+	printUsage := func(output *os.File) {
+		fmt.Fprintf(output, `Usage: %s [options]
+
+Kubernetes source:
+  -namespace, -n string   Kubernetes namespace (default "envoy-gateway-system")
+  -selector, -l string    Pod label selector (default "gateway.envoyproxy.io/owning-gateway-name=main")
+  -container, -c string   Container name (default "envoy")
+  -kubeconfig string      Optional path to explicit kubeconfig file
+  -tail int               Lines of recent log history to show (default 0)
+
+Log filters:
+  -include, -i regexp     Regex pattern to include (can be repeated)
+  -exclude, -e regexp     Regex pattern to exclude (can be repeated)
+  -status, -s range       HTTP response codes (e.g. '404,500', '200-300', '400-')
+  -duration, -d range     Request duration in ms (e.g. '-200', '200-500', '1000-')
+
+Output:
+  -json, -j               Emit raw JSON log lines instead of prettified text
+  -h, --help              Show help
+`, os.Args[0])
+	}
+	flag.Usage = func() { printUsage(os.Stderr) }
 	flag.Parse()
+	if showHelp {
+		printUsage(os.Stdout)
+		return
+	}
 
 	// Parse range matchers
 	statusMatcher, err := parseRangeMatcher(statusStr)
