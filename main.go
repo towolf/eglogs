@@ -73,6 +73,7 @@ func main() {
 	var includes regexSlice
 	var excludes regexSlice
 	var rawJSON bool
+	var minStatus int
 
 	// Repeated regex flags
 	flag.Var(&includes, "include", "Regex pattern to include (can be repeated)")
@@ -84,6 +85,11 @@ func main() {
 	flag.BoolVar(&rawJSON, "json", false, "Emit raw JSON log lines instead of prettified text")
 	flag.BoolVar(&rawJSON, "j", false, "Emit raw JSON log lines (shorthand)")
 
+	// Minimum status flag
+	flag.IntVar(&minStatus, "status", 0, "Minimum HTTP response code threshold")
+	flag.IntVar(&minStatus, "min-status", 0, "Minimum HTTP response code threshold (alias)")
+	flag.IntVar(&minStatus, "s", 0, "Minimum HTTP response code threshold (shorthand)")
+
 	// K8s & general flags
 	namespace := flag.String("namespace", "envoy-gateway-system", "Kubernetes namespace")
 	labelSelector := flag.String("l", "gateway.envoyproxy.io/owning-gateway-name=main", "Pod label selector")
@@ -91,16 +97,6 @@ func main() {
 	kubeconfig := flag.String("kubeconfig", "", "Optional path to explicit kubeconfig file")
 	tailLines := flag.Int64("tail", 1, "Lines of recent log history to show")
 	flag.Parse()
-
-	// Fallback to EGLOGS_GREP env var if no -e/-exclude passed
-	if len(excludes) == 0 {
-		if envGrep := os.Getenv("EGLOGS_GREP"); envGrep != "" {
-			pattern := strings.TrimPrefix(envGrep, "-v -e ")
-			if re, err := regexp.Compile(pattern); err == nil {
-				excludes = append(excludes, re)
-			}
-		}
-	}
 
 	// Standard Kubernetes client configuration loading
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -163,13 +159,25 @@ func main() {
 			for scanner.Scan() {
 				line := scanner.Text()
 
+				// 1. Filter by regex include/exclude
 				if !shouldProcessLine(line, includes, excludes) {
 					continue
 				}
 
+				// 2. Filter by minimum status code
+				var log EnvoyLog
+				isJSON := json.Unmarshal([]byte(line), &log) == nil
+
+				if isJSON && minStatus > 0 && log.ResponseCode < minStatus {
+					continue
+				}
+
+				// 3. Format output
 				output := line
 				if !rawJSON {
-					output = formatLogLine(line)
+					if isJSON {
+						output = formatParsedLogLine(&log)
+					}
 				}
 
 				if output != "" {
@@ -207,12 +215,7 @@ func shouldProcessLine(line string, includes, excludes regexSlice) bool {
 	return true
 }
 
-func formatLogLine(raw string) string {
-	var log EnvoyLog
-	if err := json.Unmarshal([]byte(raw), &log); err != nil {
-		return raw
-	}
-
+func formatParsedLogLine(log *EnvoyLog) string {
 	// 1. Condition: route_name == null
 	if log.RouteName == nil {
 		flags := strOr(log.ResponseFlags, "-")
