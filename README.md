@@ -23,11 +23,30 @@ go build -o eglogs main.go
 
 ## Usage
 
-Run with the defaults:
-
 ```sh
-eglogs
+$ eglogs -h
+Usage: eglogs [options]
+
+Kubernetes source:
+  -namespace, -n string   Kubernetes namespace (default "envoy-gateway-system")
+  -selector, -l string    Pod label selector (default "gateway.envoyproxy.io/owning-gateway-name=main")
+  -container, -c string   Container name (default "envoy")
+  -kubeconfig string      Optional path to explicit kubeconfig file
+  -tail int               Lines of recent log history to show (default 0)
+
+Log filters:
+  -include, -i regexp     Regex pattern to include (can be repeated)
+  -exclude, -e regexp     Regex pattern to exclude (can be repeated)
+  -status, -s range       HTTP response codes (e.g. '404,500', '200-300', '400-')
+  -duration, -d range     Request duration in ms (e.g. '-200', '200-500', '1000-')
+
+Output:
+  -json, -j               Emit raw JSON log lines instead of prettified text
+  -omit-path, -p          Omit the request path from prettified output
+  -omit-user-agent, -u    Omit the user agent from prettified output
+  -h, --help              Show help
 ```
+
 
 Select a different gateway or namespace:
 
